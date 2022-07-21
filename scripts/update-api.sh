@@ -4,7 +4,7 @@ set -e
 
 SWAGGER_FILE="$1"
 TYPES_FILE="$2"
-ASSISTED_SERVICE_SWAGGER_URL='https://raw.githubusercontent.com/openshift/assisted-service/master/swagger.yaml'
+ASSISTED_SERVICE_SWAGGER_URL='https://raw.githubusercontent.com/vrutkovs/assisted-service/nutanix-integration/swagger.yaml'
 
 curl ${ASSISTED_SERVICE_SWAGGER_URL} > "${SWAGGER_FILE}"
 yarn sw2dts -w -o "${TYPES_FILE}" "${SWAGGER_FILE}"

@@ -1002,6 +1002,11 @@ paths:
           type: string
           format: uuid
           required: true
+        - in: query
+          name: timestamp
+          type: integer
+          description: The time on the host as seconds since the Unix epoch.
+          required: false
         - in: header
           name: discovery_agent_version
           description: The software version of the discovery agent that is retrieving instructions.
@@ -1637,6 +1642,17 @@ paths:
           type: string
           enum: [discovery.ign, ipxe-script]
           required: true
+        - in: query
+          name: mac
+          description: Mac address of the host running ipxe script.
+          type: string
+          format: mac
+          required: false
+        - in: query
+          name: boot_control
+          description: Verify that script is served to hosts without installed disk.
+          type: boolean
+          required: false
       responses:
         '200':
           description: Success.
@@ -1698,6 +1714,11 @@ paths:
           type: string
           enum: [discovery.ign, ipxe-script]
           required: true
+        - in: query
+          name: boot_control
+          description: Verify that script is served to hosts without installed disk.
+          type: boolean
+          required: false
       responses:
         '200':
           description: Success.
@@ -2962,6 +2983,14 @@ paths:
           description: Success.
           schema:
             $ref: '#/definitions/openshift-versions'
+        '400':
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/error'
+        '500':
+          description: Error.
+          schema:
+            $ref: '#/definitions/error'
         '503':
           description: Unavailable.
           schema:
@@ -3949,6 +3978,8 @@ definitions:
           - insufficient-unbound
           - disabled-unbound
           - discovering-unbound
+          - reclaiming
+          - reclaiming-rebooting
       status_info:
         type: string
         x-go-custom-tag: gorm:"type:varchar(2048)"
@@ -3987,6 +4018,10 @@ definitions:
         x-go-custom-tag: gorm:"type:text"
         type: string
       api_vip_connectivity:
+        x-go-custom-tag: gorm:"type:text"
+        type: string
+        description: Contains a serialized api_vip_connectivity_response
+      tang_connectivity:
         x-go-custom-tag: gorm:"type:text"
         type: string
       inventory:
@@ -4054,6 +4089,11 @@ definitions:
         format: date-time
         x-go-custom-tag: gorm:"type:timestamp with time zone"
         description: The last time the host's agent communicated with the service.
+      registered_at:
+        type: string
+        format: date-time
+        x-go-custom-tag: gorm:"type:timestamp with time zone"
+        description: The last time the host's agent tried to register in the service.
       discovery_agent_version:
         type: string
       requested_hostname:
@@ -4087,6 +4127,9 @@ definitions:
           "contents": {"source": "data:text/plain;base64,aGVscGltdHJhcHBlZGluYXN3YWdnZXJzcGVj"}}]}}'
       installer_args:
         type: string
+      timestamp:
+        type: integer
+        description: The time on the host as seconds since the Unix epoch.
       machine_config_pool_name:
         type: string
       images_status:
@@ -4149,6 +4192,7 @@ definitions:
       - free-network-addresses
       - dhcp-lease-allocate
       - api-vip-connectivity-check
+      - tang-connectivity-check
       - ntp-synchronizer
       - installation-disk-speed-check
       - container-image-availability
@@ -4776,6 +4820,12 @@ definitions:
         type: boolean
         description: Schedule workloads on masters
         default: false
+      schedulable_masters_forced_true:
+        type: boolean
+        description: |
+          Indicates if schedule workloads on masters will be enabled regardless the value of 'schedulable_masters' property.
+          Set to 'true' when not enough hosts are associated with this cluster to disable the scheduling on masters.
+        default: true
       updated_at:
         type: string
         format: date-time
@@ -4836,14 +4886,6 @@ definitions:
         description:
           JSON-formatted string containing the user overrides for the install-config.yaml file.
         example: '{"networking":{"networkType": "OVNKubernetes"},"fips":true}'
-      ignition_config_overrides:
-        x-go-custom-tag: gorm:"type:text"
-        type: string
-        description:
-          Json formatted string containing the user overrides for the initial ignition config
-        example:
-          '{"ignition": {"version": "3.1.0"}, "storage": {"files": [{"path": "/tmp/example",
-          "contents": {"source": "data:text/plain;base64,aGVscGltdHJhcHBlZGluYXN3YWdnZXJzcGVj"}}]}}'
       controller_logs_collected_at:
         type: string
         format: date-time
@@ -4928,6 +4970,18 @@ definitions:
         type: object
         $ref: '#/definitions/ignition-endpoint'
         description: Explicit ignition endpoint overrides the default ignition endpoint.
+      imported:
+        type: boolean
+        default: false
+        description: |-
+          Indicates whether this cluster is an imported day-2 cluster or a
+          regular cluster. Clusters are considered imported when they are
+          created via the ../clusters/import endpoint. Day-2 clusters converted
+          from day-1 clusters by kube-api controllers or the
+          ../clusters/<cluster_id>/actions/allow-add-workers endpoint are not
+          considered imported. Imported clusters usually lack a lot of
+          information and are filled with default values that don't necessarily
+          reflect the actual cluster they represent
 
   ignition-endpoint:
     type: object
@@ -5267,6 +5321,13 @@ definitions:
         items:
           type: object
           $ref: '#/definitions/service_network'
+      forbidden_hostnames:
+        description:
+          This provides a list of forbidden hostnames. If this list is empty or not present, this
+          implies that the UI should fall back to a hard coded list.
+        type: array
+        items:
+          type: string
 
   infra_error:
     type: object
@@ -5317,6 +5378,8 @@ definitions:
           type: string
       speed_mbps:
         type: integer
+      type:
+        type: string
 
   disk:
     type: object
@@ -5327,7 +5390,7 @@ definitions:
           Determine the disk's unique identifier which is the by-id field if it exists and fallback
           to the by-path field otherwise
       drive_type:
-        type: string
+        $ref: '#/definitions/drive_type'
       has_uuid:
         type: boolean
       vendor:
@@ -5377,6 +5440,23 @@ definitions:
         type: string
       io_perf:
         $ref: '#/definitions/io_perf'
+      holders:
+        type: string
+        description: A comma-separated list of disk names that this disk belongs to
+
+  drive_type:
+    type: string
+    enum:
+      - Unknown
+      - HDD
+      - FDD
+      - ODD
+      - SSD
+      - virtual
+      - Multipath
+      - iSCSI
+      - FC
+      - LVM
 
   io_perf:
     type: object
@@ -5468,6 +5548,10 @@ definitions:
         type: integer
         format: int32
         description: Defines whether this is an IPv4 (4) or IPv6 route (6)
+      metric:
+        type: integer
+        format: int32
+        description: Route priority metric
 
   inventory:
     type: object
@@ -5555,13 +5639,57 @@ definitions:
 
   api_vip_connectivity_response:
     type: object
+    description: |
+      The response from the day-2 agent's attempt to download the worker ignition file from the API machine config server of the target cluster.
+      Note - the name "API VIP connectivity" is old and misleading and is preserved for backwards compatibility.
     properties:
       is_success:
         type: boolean
-        description: Ignition downloadability check result.
+        description: Whether the agent was able to contact the API of the target cluster or not
       ignition:
         type: string
-        description: Ignition fetched from the specified API VIP
+        description: |
+          Ignition file fetched from the target cluster's API machine config server.
+          This ignition file may be incomplete as almost all files / systemd units are removed from it by the agent in order to save space.
+
+  tang_connectivity_request:
+    type: object
+    required:
+      - tang_servers
+    properties:
+      tang_servers:
+        type: string
+        description:
+          JSON-formatted string containing additional information regarding tang's configuration
+
+  tang_connectivity_response:
+    type: object
+    properties:
+      is_success:
+        type: boolean
+        description: Tang check result.
+      tang_server_response:
+        type: array
+        items:
+          x-go-name: TangServerResponse
+          type: object
+          properties:
+            tang_url:
+              type: string
+              description: Tang URL.
+            payload:
+              type: string
+              description: Tang response payload.
+            signatures:
+              type: array
+              items:
+                x-go-name: TangServerSignatures
+                type: object
+                properties:
+                  protected:
+                    type: string
+                  signature:
+                    type: string
 
   disk_speed_check_request:
     type: object
@@ -5654,6 +5782,7 @@ definitions:
     type: string
     enum:
       - baremetal
+      - nutanix
       - vsphere
       - ovirt
       - none
@@ -5934,6 +6063,9 @@ definitions:
       installer_args:
         type: string
         description: Core-os installer addtional args
+      skip_installation_disk_cleanup:
+        type: boolean
+        description: Skip formatting installation disk
 
   ntp_synchronization_request:
     type: object
@@ -6172,7 +6304,6 @@ definitions:
       - openshift_version
       - cpu_architecture
       - url
-      - rootfs_url
       - version
     properties:
       openshift_version:
@@ -6186,9 +6317,6 @@ definitions:
       url:
         type: string
         description: The base OS image used for the discovery iso.
-      rootfs_url:
-        type: string
-        description: The OS rootfs url.
       version:
         type: string
         description: Build ID of the OS image.

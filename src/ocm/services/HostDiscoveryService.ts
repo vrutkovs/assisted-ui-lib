@@ -14,7 +14,7 @@ const HostDiscoveryService = {
   setPlatform(params: V2ClusterUpdateParams, usePlatformIntegration: boolean): void {
     if (usePlatformIntegration) {
       params.platform = {
-        type: 'vsphere',
+        type: 'nutanix',
       };
     } else {
       params.platform = {

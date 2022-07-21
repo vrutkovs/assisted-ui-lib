@@ -33,12 +33,12 @@ import { CnvCheckbox } from './CnvCheckbox';
 
 const PlatformIntegrationLabel: React.FC = () => (
   <>
-    <span>Integrate with vSphere</span>{' '}
+    <span>Integrate with Nutanix</span>{' '}
     <PopoverIcon
       bodyContent={
         <>
-          Enable vSphere integration to access features like node auto-scaling and persistent
-          storage directly inside OpenShift. You'll need to set vSphere configuration after cluster
+          Enable Nutanix integration to access features like node auto-scaling and persistent
+          storage directly inside OpenShift. You'll need to set Nutanix configuration after cluster
           installation is complete.
         </>
       }
@@ -46,10 +46,7 @@ const PlatformIntegrationLabel: React.FC = () => (
         <>
           <Title headingLevel="h6">Requirements</Title>
           <List>
-            <ListItem>A network connection between vSphere and the installed OCP cluster</ListItem>
-            <ListItem>
-              Set <code>disk.enableUUID</code> to <code>true</code> inside vSphere
-            </ListItem>
+            <ListItem>A network connection between Nutanix and the installed OCP cluster</ListItem>
           </List>
         </>
       }
